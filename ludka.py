@@ -225,7 +225,40 @@ def generate_top_text() -> str:
 
     text += "\n🔄 *Сброс лидерборда каждое воскресенье в 23:59 UTC*"
     return text
+# --- КОМАНДА ДЛЯ СОЗЫВА ВСЕХ УЧАСТНИКОВ ---
+@dp.message(Command("all"))
+async def cmd_tag_all(message: Message):
+    if not is_allowed_chat(message.chat.id, message.from_user.id):
+        return
 
+    data = load_data()
+    week_key = get_current_week_key()
+    current_week_data = data.get(week_key, {})
+
+    # Формируем теги по юзернеймам или текстовым ссылкам на аккаунты
+    mentions = []
+    for uid, pdata in current_week_data.items():
+        name = pdata.get("name", "Игрок")
+        if name.startswith("@"):
+            mentions.append(name)
+        else:
+            # Если юзернейма нет, тегаем через скрытую ссылку по ID
+            mentions.append(f"[{name}](tg://user?id={uid})")
+
+    if not mentions:
+        await message.answer("👥 В базе пока нет активных игроков для созыва!")
+        return
+
+    # Разбиваем на пачки по 5 человек, чтобы Telegram гарантированно прислал пуши всем
+    chunk_size = 5
+    for i in range(0, len(mentions), chunk_size):
+        chunk = mentions[i:i + chunk_size]
+        tags_line = " ".join(chunk)
+        await message.answer(
+            f"🚨 **ОБЩИЙ СБОР!**\n\n🎰 Залетайте крутить слоты!\n{tags_line}",
+            parse_mode="Markdown"
+        )
+        await asyncio.sleep(0.5)
 def get_random_gift(pool_type="BASE"):
     pool = GIFTS_CONFIG[pool_type]
     slug = random.choice(list(pool.keys()))
