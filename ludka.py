@@ -7,9 +7,13 @@ from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message
 
+# Загружаем переменные из .env, если запускаем локально
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise ValueError("Переменная BOT_TOKEN не установлена!")
+
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
@@ -47,6 +51,7 @@ async def get_random_real_gift():
 
 @dp.message(F.dice)
 async def handle_dice(message: Message):
+    # Игнорируем пересылки и не-777
     if message.forward_origin is not None or message.dice.value != 64:
         return
 
@@ -63,10 +68,28 @@ async def handle_dice(message: Message):
         f"✅ Подарок отправлен автоматически!"
     )
 
+# --- Вспомогательный веб-сервер для прохождения проверок Render ---
+async def handle_ping(request):
+    return web.Response(text="Bot is running!")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get("/", handle_ping)
+    app.router.add_get("/health", handle_ping)
+    
+    runner = web.AppRunner(app)
+    await runner.setup()
+    
+    # Render автоматически передает порт через переменную окружения PORT
+    port = int(os.getenv("PORT", 8080))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    print(f"🌐 Веб-сервер запущен на порту {port}")
+
 async def main():
     await start_web_server()
-    print("✅ Web-сервер и бот запущены...")
+    print("✅ Бот готов и слушает сообщения...")
     await dp.start_polling(bot)
 
-if __name__ == "__main__":
+if name == "__main__":
     asyncio.run(main())
