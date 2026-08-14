@@ -169,5 +169,5 @@ async def main():
     print("✅ Бот со Snoop Dogg и защитой запущен")
     await dp.start_polling(bot)
 
-if name == "__main__":
+if __name__ == "__main__":
     asyncio.run(main())
