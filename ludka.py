@@ -269,7 +269,8 @@ async def start_web_server():
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
 
-async def main():await start_web_server()
+async def main():
+    await start_web_server()
     print("✅ Бот запущен с недельным топом (Vice Cream + Звезды)")
     await dp.start_polling(bot)
 
