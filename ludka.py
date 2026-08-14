@@ -20,10 +20,6 @@ if not BOT_TOKEN:
 raw_admins = os.getenv("ADMIN_IDS", "12345678,87654321,99999999")
 ADMIN_IDS = [int(admin_id.strip()) for admin_id in raw_admins.split(",") if admin_id.strip().isdigit()]
 
-# Канал для обязательной подписки (юзернейм или ID)
-CHANNEL_ID = os.getenv("CHANNEL_ID", "@ludkanft7771")
-CHANNEL_URL = os.getenv("CHANNEL_URL", "https://t.me/ludkanft7771")
-
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
@@ -41,7 +37,7 @@ GIFTS_CONFIG = {
 }
 
 user_cooldowns = {}
-COOLDOWN_SECONDS = 2
+COOLDOWN_SECONDS = 1  # Минимальная задержка от кликеров
 
 
 # --- РАБОТА С БАЗОЙ ДАННЫХ ---
@@ -77,23 +73,28 @@ def add_spin(user_id: int, name: str):
     data[week_key][uid]["spins"] += 1
     save_data(data)
 
-def add_win(user_id: int):
+def add_win(user_id: int, name: str):
     data = load_data()
     week_key = get_current_week_key()
     uid = str(user_id)
-    if week_key in data and uid in data[week_key]:
-        data[week_key][uid]["wins"] = data[week_key][uid].get("wins", 0) + 1
-        save_data(data)
+    if week_key not in data:
+        data[week_key] = {}
+    if uid not in data[week_key]:
+        data[week_key][uid] = {"name": name, "spins": 1, "wins": 0}
+    
+    data[week_key][uid]["name"] = name
+    data[week_key][uid]["wins"] = data[week_key][uid].get("wins", 0) + 1
+    save_data(data)
 
-def get_user_stats(user_id: int) -> dict:
+def get_user_stats(user_id: int, fallback_name: str) -> dict:
     data = load_data()
     week_key = get_current_week_key()
     current_week_data = data.get(week_key, {})
     
     uid = str(user_id)
-    user_info = current_week_data.get(uid, {"name": "Игрок", "spins": 0, "wins": 0})
+    user_info = current_week_data.get(uid, {"name": fallback_name, "spins": 0, "wins": 0})
     
-    # Сортируем для вычисления места
+    # Сортировка для определения места
     sorted_players = sorted(current_week_data.items(), key=lambda x: x[1]["spins"], reverse=True)
     
     rank = "—"
@@ -104,39 +105,37 @@ def get_user_stats(user_id: int) -> dict:
             rank = f"#{idx + 1}"
             break
 
-    # Считаем, сколько не хватает до топ-3
     if len(sorted_players) >= 3 and uid in current_week_data:
         top_3_spins = sorted_players[2][1]["spins"]
         if user_info["spins"] <= top_3_spins:
             spins_to_top3 = (top_3_spins - user_info["spins"]) + 1
 
     return {
-        "name": user_info["name"],
+        "name": user_info.get("name") or fallback_name,
         "spins": user_info["spins"],
         "wins": user_info.get("wins", 0),
         "rank": rank,
         "spins_to_top3": spins_to_top3
     }
 
-def generate_profile_text(user_id: int) -> str:
-    stats = get_user_stats(user_id)
+def generate_profile_text(user_id: int, fallback_name: str) -> str:
+    stats = get_user_stats(user_id, fallback_name)
     week_key = get_current_week_key()
 
     text = "👤 **ЛИЧНЫЙ ПРОФИЛЬ ИГРОКА**\n"
     text += f"📅 Сезон: `{week_key}`\n"
     text += "────────────────────\n"
     text += f"🎮 Никнейм: **{stats['name']}**\n"
-    text += f"🎰 Прокрутов за неделю: **{stats['spins']}**\n"
+    text += f"🎰 Спинов за неделю: **{stats['spins']}**\n"
     text += f"🔥 Выбито 777: {stats['wins']} раз(а)\n"
-    text += f"🏆 Место в лидерборде: **{stats['rank']}**\n"
+    text += f"🏆 Место в топе: **{stats['rank']}**\n"
     
     if stats["spins_to_top3"] > 0:
-        text += f"🎯 До ТОП-3 не хватает: {stats['spins_to_top3']} спинов\n"
-    elif stats["rank"] in ["#1", "#2", "#3"]:
-        text += "👑 **Вы в призовой зоне ТОП-3!**\n"
+        text += f"🎯 До ТОП-3 не хватает: {stats['spins_to_top3']} спинов\n"elif stats["rank"] in ["#1", "#2", "#3"]:
+        text += "👑 **Вы в призовой тройке!**\n"
         
     text += "────────────────────\n"
-    text += "🎰 *Крути слот-машину в чате, чтобы подниматься в топе!*"
+    text += "🎰 *Крути слот-машину в чате, чтобы повысить рейтинг!*"
     return text
 
 def generate_top_text() -> str:
@@ -145,7 +144,7 @@ def generate_top_text() -> str:
     current_week_data = data.get(week_key, {})
 
     text = "🏆 **НЕДЕЛЬНЫЙ ТОП ПО ПРОКРУТАМ**\n"
-    text += f"📅 *Сезон недели: {week_key}*\n"
+    text += f"📅 *Сезон: {week_key}*\n"
     text += "────────────────────\n"
     text += "🎁 **Призы за топ недели:**\n"
     text += "🥇 1 место — **NFT Vice Cream 🍦**\n"
@@ -172,7 +171,7 @@ def generate_top_text() -> str:
 
         text += f"{rank_icon} {player['name']}: {player['spins']} спинов{prize_tag}\n"
 
-    text += "\n🔄 *Топ обновляется каждое воскресенье в 23:59 UTC*"
+    text += "\n🔄 *Сброс лидерборда каждое воскресенье в 23:59 UTC*"
     return text
 
 def get_random_gift(pool_type="BASE"):
@@ -184,18 +183,6 @@ def get_random_gift(pool_type="BASE"):
     gift_name = f"{config['name']} #{nft_id}"
     gift_link = f"https://t.me/nft/{slug}-{nft_id}"
     return gift_name, gift_link
-
-
-# --- ПРОВЕРКА ПОДПИСКИ НА КАНАЛ (ОП) ---
-async def check_subscription(user_id: int) -> bool:
-    if user_id in ADMIN_IDS:
-        return True
-    try:
-        member = await bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
-        return member.status in ["member", "administrator", "creator"]
-    except Exception:
-        # Если канал не настроен или бота там нет, не блокируем игру
-        return True
 
 async def is_user_admin(chat_id: int, user_id: int) -> bool:
     if user_id in ADMIN_IDS:
@@ -229,7 +216,8 @@ async def cmd_top(message: Message):
 
 @dp.message(Command("profile", "me"))
 async def cmd_profile(message: Message):
-    text = generate_profile_text(message.from_user.id)
+    username = f"@{message.from_user.username}" if message.from_user.username else message.from_user.full_name
+    text = generate_profile_text(message.from_user.id, username)
     await message.answer(text, parse_mode="Markdown")
 
 @dp.callback_query(F.data == "show_top")
@@ -240,7 +228,8 @@ async def handle_show_top(callback: CallbackQuery):
 
 @dp.callback_query(F.data == "show_profile")
 async def handle_show_profile(callback: CallbackQuery):
-    text = generate_profile_text(callback.from_user.id)
+    username = f"@{callback.from_user.username}" if callback.from_user.username else callback.from_user.full_name
+    text = generate_profile_text(callback.from_user.id, username)
     await callback.message.answer(text, parse_mode="Markdown")
     await callback.answer()
 
@@ -248,50 +237,36 @@ async def handle_show_profile(callback: CallbackQuery):
 # --- ХЕНДЛЕР СЛОТ-МАШИНЫ ---
 @dp.message(F.dice)
 async def handle_dice(message: Message):
-    user_id = message.from_user.idcurrent_time = time.time()
+    user_id = message.from_user.id
+    current_time = time.time()
 
-    # 1. Защита от пересылок
+    # Защита от пересылок
     if message.forward_origin is not None:
         return
 
-    # 2. Проверка, что это слот 🎰
-    if message.dice.emoji != "🎰":
-        return
+    # Проверка, что это именно 🎰
+    if message.dice.emoji != "🎰":return
 
-    # 3. Кулдаун
+    # Кулдаун
     if current_time - user_cooldowns.get(user_id, 0) < COOLDOWN_SECONDS:
         return
     user_cooldowns[user_id] = current_time
 
-    # 4. Проверка обязательной подписки на канал
-    is_subscribed = await check_subscription(user_id)
-    if not is_subscribed:
-        sub_kb = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="📢 Подписаться на канал", url=CHANNEL_URL)]
-            ]
-        )
-        await message.reply(
-            "⚠️ **Для участия в розыгрыше и получения призов необходимо подписаться на наш канал!**",
-            reply_markup=sub_kb,
-            parse_mode="Markdown"
-        )
-        return
-
     username = f"@{message.from_user.username}" if message.from_user.username else message.from_user.full_name
 
-    # Засчитываем прокрут обычным игрокам
+    # Добавляем спин обычным игрокам (админов в рейтинг не включаем)
     is_admin = await is_user_admin(message.chat.id, user_id)
     if not is_admin:
         add_spin(user_id, username)
 
-    # Если не 777 — выходим
+    # Если не 777 (значение 64) — выходим
     if message.dice.value != 64:
         return
 
-    # Фиксируем победу в профиль
-    add_win(user_id)
+    # Записываем джекпот 777
+    add_win(user_id, username)
 
+    # Получаем подарок
     name, link = get_random_gift("BASE")
 
     keyboard = InlineKeyboardMarkup(
@@ -332,7 +307,7 @@ async def handle_dice(message: Message):
         parse_mode="Markdown"
     )
 
-    # Автозакрепление победного сообщения
+    # Закрепление победного сообщения
     try:
         await bot.pin_chat_message(
             chat_id=message.chat.id,
@@ -372,7 +347,10 @@ async def handle_claim(callback: CallbackQuery):
 
     text = f"🔔 **Новая заявка на вывод!**\n\n👤 Игрок: {username} (ID: `{owner_id}`)\n💬 Чат ID: `{chat_id}`"
     await notify_all_admins(text, admin_kb, claim_key)
-    await callback.answer()# --- АПГРЕЙД ДО SNOOP DOGG ---
+    await callback.answer()
+
+
+# --- АПГРЕЙД ДО SNOOP DOGG ---
 @dp.callback_query(F.data.startswith("upg:"))
 async def handle_upgrade(callback: CallbackQuery):
     _, owner_id, chat_id = callback.data.split(":")
@@ -385,11 +363,10 @@ async def handle_upgrade(callback: CallbackQuery):
     await callback.message.edit_reply_markup(reply_markup=None)
     username = f"@{callback.from_user.username}" if callback.from_user.username else callback.from_user.full_name
 
-    # Реальный скрытый шанс 5%
+    # Реальный шанс: 5%
     is_success = random.randint(1, 100) <= 5
 
-    if is_success:
-        upg_name, upg_link = get_random_gift("UPGRADE")
+    if is_success:upg_name, upg_link = get_random_gift("UPGRADE")
         upg_msg = await callback.message.answer(
             f"🔥 ДЖЕКПОТ! АПГРЕЙД УСПЕШЕН! (Шанс 40% сработал!)\n\n"
             f"👤 Игрок: {username}\n"
@@ -498,10 +475,7 @@ async def handle_admin_reject(callback: CallbackQuery):
     except Exception:
         pass
 
-    await callback.answer("Отклонено!")
-
-
-# --- ХЕЛСЧЕК ДЛЯ RENDER ---
+    await callback.answer("Отклонено!")# --- ХЕЛСЧЕК ДЛЯ RENDER ---
 async def handle_ping(request):
     return web.Response(text="Bot is running!")
 
@@ -518,8 +492,8 @@ async def start_web_server():
 
 async def main():
     await start_web_server()
-    print("✅ Бот запущен: Обязательная подписка (ОП) и Профили игроков активны!")
+    print("✅ Бот запущен со всеми исправлениями")
     await dp.start_polling(bot)
 
-if __name__== "__main__":
+if __name__ == "__main__":
     asyncio.run(main())
