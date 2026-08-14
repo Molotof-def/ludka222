@@ -3,7 +3,6 @@ import time
 import json
 import random
 import asyncio
-import aiohttp
 from datetime import datetime, timezone
 from aiohttp import web
 from dotenv import load_dotenv
@@ -17,32 +16,34 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN не установлен!")
 
+# Считываем список ID админов через запятую (например: "12345678,87654321,99999999")
+raw_admins = os.getenv("ADMIN_IDS", "12345678,87654321,99999999")
+ADMIN_IDS = [int(admin_id.strip()) for admin_id in raw_admins.split(",") if admin_id.strip().isdigit()]
+
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Файл локальной базы данных
 DATA_FILE = "weekly_spins.json"
 
-MIN_ID = 1
-MAX_ID = 482271
-MAX_TRIES = 20
+# Хранилище отправленных сообщений админам для синхронизации кнопок: {claim_key: [(admin_id, message_id)]}
+pending_claims = {}
 
-BASE_GIFTS = {
-    "ChillFlame": "Chill Flame",
-    "ViceCream": "Vice Cream"
-}
-
-UPGRADED_GIFTS = {
-    "SnoopDogg": "Snoop Dogg"
+GIFTS_CONFIG = {
+    "BASE": {
+        "ChillFlame": {"name": "Chill Flame", "max_id": 50000},
+        "ViceCream": {"name": "Vice Cream", "max_id": 15000}
+    },
+    "UPGRADE": {
+        "SnoopDogg": {"name": "Snoop Dogg", "max_id": 10000}
+    }
 }
 
 user_cooldowns = {}
-COOLDOWN_SECONDS = 3
+COOLDOWN_SECONDS = 2
 
 
-# --- РАБОТА С НЕДЕЛЬНОЙ БАЗОЙ ДАННЫХ ---
+# --- РАБОТА С БАЗОЙ ТОПА ---
 def get_current_week_key() -> str:
-    """Возвращает ключ текущей недели в формате 'ГОД-НЕДЕЛЯ' (например, '2026-33')"""
     year, week, _ = datetime.now(timezone.utc).isocalendar()
     return f"{year}-W{week:02d}"
 
@@ -63,7 +64,6 @@ def add_spin(user_id: int, name: str):
     data = load_data()
     week_key = get_current_week_key()
     
-    # Инициализация недели, если наступила новая
     if week_key not in data:
         data[week_key] = {}
         
@@ -90,10 +90,9 @@ def generate_top_text() -> str:
     text += "────────────────────\n\n"
 
     if not current_week_data:
-        text += "🎰 На этой неделе еще никто не крутил!\nБудь первым!"
+        text += "🎰 На этой неделе еще никто не крутил!\n"
         return text
 
-    # Сортировка участников по убыванию количества прокрутов
     sorted_players = sorted(current_week_data.values(), key=lambda x: x["spins"], reverse=True)
     medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
 
@@ -112,41 +111,47 @@ def generate_top_text() -> str:
     text += "\n🔄 *Топ обновляется каждое воскресенье в 23:59 UTC*"
     return text
 
-
-# --- ПРОВЕРКА NFT НА FRAGMENT ---
-async def nft_exists(session: aiohttp.ClientSession, gift_slug: str, nft_id: int) -> bool:
-    url = f"https://t.me/nft/{gift_slug}-{nft_id}"
-    try:
-        async with session.get(url, timeout=5) as resp:
-            if resp.status != 200:
-                return False
-            text = await resp.text()
-            return gift_slug in text and f"#{nft_id}" in text
-    except Exception:
-        return False
-
-async def get_random_real_gift(pool: dict):
-    async with aiohttp.ClientSession() as session:
-        for _ in range(MAX_TRIES):
-            nft_id = random.randint(MIN_ID, MAX_ID)
-            gift_slug = random.choice(list(pool.keys()))
-            
-            if await nft_exists(session, gift_slug, nft_id):
-                display_name = pool[gift_slug]
-                return f"{display_name} #{nft_id}", f"https://t.me/nft/{gift_slug}-{nft_id}"
+def get_random_gift(pool_type="BASE"):
+    pool = GIFTS_CONFIG[pool_type]
+    slug = random.choice(list(pool.keys()))
+    config = pool[slug]
+    nft_id = random.randint(1, config["max_id"])
     
-    fallback_slug = list(pool.keys())[0]
-    return f"{pool[fallback_slug]} #1", f"https://t.me/nft/{fallback_slug}-1"
+    gift_name = f"{config['name']} #{nft_id}"
+    gift_link = f"https://t.me/nft/{slug}-{nft_id}"
+    return gift_name, gift_link
 
 
-# --- КОМАНДА /TOP ---
+# --- ПРОВЕРКА НА АДМИНИСТРАТОРА ---
+async def is_user_admin(chat_id: int, user_id: int) -> bool:
+    if user_id in ADMIN_IDS:
+        return True
+    try:
+        member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
+        return member.status in ["administrator", "creator"]
+    except Exception:
+        return False# --- ОТПРАВКА УВЕДОМЛЕНИЯ ВСЕМ АДМИНАМ ---
+async def notify_all_admins(text: str, reply_markup: InlineKeyboardMarkup, claim_key: str):
+    pending_claims[claim_key] = []
+    for admin_id in ADMIN_IDS:
+        try:
+            sent_msg = await bot.send_message(
+                chat_id=admin_id,
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode="Markdown"
+            )
+            pending_claims[claim_key].append((admin_id, sent_msg.message_id))
+        except Exception as e:
+            print(f"Не удалось отправить админу {admin_id}: {e}")
+
+
+# --- КОМАНДЫ И КНОПКИ ТОПА ---
 @dp.message(Command("top"))
 async def cmd_top(message: Message):
     text = generate_top_text()
     await message.answer(text, parse_mode="Markdown")
 
-
-# --- ОБРАБОТЧИК КНОПКИ ТОПА ---
 @dp.callback_query(F.data == "show_top")
 async def handle_show_top(callback: CallbackQuery):
     text = generate_top_text()
@@ -154,52 +159,51 @@ async def handle_show_top(callback: CallbackQuery):
     await callback.answer()
 
 
-# --- ХЕНДЛЕР СЛОТОВ ---
+# --- ХЕНДЛЕР СЛОТ-МАШИНЫ ---
 @dp.message(F.dice)
 async def handle_dice(message: Message):
     user_id = message.from_user.id
     current_time = time.time()
 
-    # 1. Защита от пересылок
-    if message.forward_origin is not None:
+    if message.forward_origin is not None or message.dice.emoji != "🎰":
         return
 
-    # 2. Проверяем, что это слот-машина 🎰
-    if message.dice.emoji != "🎰":
-        return
-
-    # 3. Защита от старых пакетов
     if current_time - message.date.timestamp() > 15:
         return
 
-    # 4. Защита от флуда/спама
     if current_time - user_cooldowns.get(user_id, 0) < COOLDOWN_SECONDS:
         return
     user_cooldowns[user_id] = current_time
 
     username = f"@{message.from_user.username}" if message.from_user.username else message.from_user.full_name
 
-    # Засчитываем спин в текущую неделю
-    add_spin(user_id, username)
+    # Все 3 админа и админы чата исключены из топа
+    is_admin = await is_user_admin(message.chat.id, user_id)
+    if not is_admin:
+        add_spin(user_id, username)
 
-    # Если не 777 (значение 64) — выходим
     if message.dice.value != 64:
         return
 
-    # Выбиты 777
-    name, link = await get_random_real_gift(BASE_GIFTS)
+    name, link = get_random_gift("BASE")
 
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
                     text="⚡️ Улучшить до Snoop Dogg (Шанс 40%)", 
-                    callback_data=f"upg:{user_id}"
+                    callback_data=f"upg:{user_id}:{message.chat.id}"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="🏆 Недельный лидерборд", 
+                    text="📥 Забрать подарок", 
+                    callback_data=f"claim:{user_id}:{message.chat.id}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🏆 Лидерборд", 
                     callback_data="show_top"
                 )
             ]
@@ -208,41 +212,87 @@ async def handle_dice(message: Message):
 
     await message.answer(
         f"🎁 {username} выбил 777!\n\n"
-        f"Подарок: {name}\n"
+        f"Подарок: **{name}**\n"
         f"🔗 {link}\n\n"
-        f"✅ Подарок готов к отправке!\n"
-        f"Ты можешь забрать его или рискнуть улучшить до Snoop Dogg (40% шанс на успех, 60% — сгорание).",
+        f"Выбери действие:\n"
+        f"• Нажми Забрать, чтобы отправить заявку админам на вывод.\n"
+        f"• Нажми Улучшить, чтобы рискнуть получить Snoop Dogg (40% шанс / 60% сгорание).",
         reply_markup=keyboard,
         parse_mode="Markdown"
     )
 
 
-# --- ХЕНДЛЕР АПГРЕЙДА ---
+# --- ЗАБРАТЬ ОБЫЧНЫЙ ПОДАРОК ---
+@dp.callback_query(F.data.startswith("claim:"))
+async def handle_claim(callback: CallbackQuery):
+    _, owner_id, chat_id = callback.data.split(":")
+    owner_id, chat_id = int(owner_id), int(chat_id)
+
+    if callback.from_user.id != owner_id:
+        await callback.answer("❌ Это не твой подарок!", show_alert=True)
+        return
+
+    await callback.message.edit_reply_markup(reply_markup=None)
+    username = f"@{callback.from_user.username}" if callback.from_user.username else callback.from_user.full_name
+
+    await callback.message.answer(
+        f"⏳ {username} отправил заявку на вывод подарка!\nАдминистрация проверяет отправку."
+    )
+
+    claim_key = f"{owner_id}_{int(time.time())}"
+    admin_kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Одобрить", callback_data=f"adm_ok:{owner_id}:{chat_id}:{claim_key}"),
+                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"adm_no:{owner_id}:{chat_id}:{claim_key}")
+            ]
+        ]
+    )
+
+    text = f"🔔 **Новая заявка на вывод!**\n\n👤 Игрок: {username} (ID: `{owner_id}`)\n💬 Чат ID: `{chat_id}`"await notify_all_admins(text, admin_kb, claim_key)
+    await callback.answer()
+
+
+# --- АПГРЕЙД ДО SNOOP DOGG ---
 @dp.callback_query(F.data.startswith("upg:"))
 async def handle_upgrade(callback: CallbackQuery):
-    owner_id = int(callback.data.split(":")[1])
+    _, owner_id, chat_id = callback.data.split(":")
+    owner_id, chat_id = int(owner_id), int(chat_id)
 
     if callback.from_user.id != owner_id:
         await callback.answer("❌ Это не твой выигрыш!", show_alert=True)
         return
 
     await callback.message.edit_reply_markup(reply_markup=None)
-
     username = f"@{callback.from_user.username}" if callback.from_user.username else callback.from_user.full_name
 
-    # Скрытый реальный шанс: 5%
+    # Реальный шанс: 5%
     is_success = random.randint(1, 100) <= 5
 
     if is_success:
-        upg_name, upg_link = await get_random_real_gift(UPGRADED_GIFTS)
+        upg_name, upg_link = get_random_gift("UPGRADE")
         await callback.message.answer(
             f"🔥 ДЖЕКПОТ! АПГРЕЙД УСПЕШЕН! (Шанс 40% сработал!)\n\n"
             f"👤 Игрок: {username}\n"
             f"✨ Эксклюзивный Подарок: **{upg_name}**\n"
             f"🔗 {upg_link}\n\n"
-            f"🚀 Подарок отправлен автоматически!",
+            f"⏳ Заявка передана администрации на подтверждение!",
             parse_mode="Markdown"
         )
+
+        claim_key = f"{owner_id}_{int(time.time())}"
+        admin_kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="✅ Одобрить NFT Snoop Dogg", callback_data=f"adm_ok:{owner_id}:{chat_id}:{claim_key}"),
+                    InlineKeyboardButton(text="❌ Отклонить", callback_data=f"adm_no:{owner_id}:{chat_id}:{claim_key}")
+                ]
+            ]
+        )
+
+        text = f"🚨 **КРУПНЫЙ ВЫИГРЫШ (Snoop Dogg)!**\n\n👤 Игрок: {username} (ID: `{owner_id}`)\nПодарок: {upg_name}\nСсылка: {upg_link}"
+        await notify_all_admins(text, admin_kb, claim_key)
+
     else:
         await callback.message.answer(
             f"💥 НЕУДАЧА! (Сработал шанс 60%)\n\n"
@@ -254,7 +304,77 @@ async def handle_upgrade(callback: CallbackQuery):
     await callback.answer()
 
 
-# --- ХЕЛСЧЕК ВЕБ-СЕРВЕРА ДЛЯ RENDER ---
+# --- ДЕЙСТВИЯ АДМИНИСТРАТОРОВ (ОДОБРИТЬ / ОТКЛОНИТЬ) ---
+@dp.callback_query(F.data.startswith("adm_ok:"))
+async def handle_admin_approve(callback: CallbackQuery):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("У вас нет прав администратора!", show_alert=True)
+        return
+
+    _, player_id, chat_id, claim_key = callback.data.split(":")
+    player_id, chat_id = int(player_id), int(chat_id)
+    admin_name = f"@{callback.from_user.username}" if callback.from_user.username else callback.from_user.full_name
+
+    # Обновляем сообщения у всех 3 админов
+    if claim_key in pending_claims:
+        for adm_id, msg_id in pending_claims[claim_key]:
+            try:
+                await bot.edit_message_text(
+                    chat_id=adm_id,
+                    message_id=msg_id,
+                    text=f"{callback.message.text}\n\n✅ **ОДОБРЕНО администратором {admin_name}**"
+                )
+            except Exception:
+                pass
+        del pending_claims[claim_key]
+
+    try:
+        await bot.send_message(
+            chat_id=chat_id,
+            text=f"✅ Подарок для игрока [ID: {player_id}] успешно подтвержден администрацией и передан!",
+            parse_mode="Markdown"
+        )
+    except Exception:
+        pass
+
+    await callback.answer("Одобрено!")
+
+
+@dp.callback_query(F.data.startswith("adm_no:"))
+async def handle_admin_reject(callback: CallbackQuery):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("У вас нет прав администратора!", show_alert=True)
+        return
+
+    _, player_id, chat_id, claim_key = callback.data.split(":")
+    player_id, chat_id = int(player_id), int(chat_id)
+    admin_name = f"@{callback.from_user.username}" if callback.from_user.username else callback.from_user.full_name
+
+    # Обновляем сообщения у всех 3 админов
+    if claim_key in pending_claims:
+        for adm_id, msg_id in pending_claims[claim_key]:
+            try:
+                await bot.edit_message_text(chat_id=adm_id,
+                    message_id=msg_id,
+                    text=f"{callback.message.text}\n\n❌ **ОТКЛОНЕНО администратором {admin_name}**"
+                )
+            except Exception:
+                pass
+        del pending_claims[claim_key]
+
+    try:
+        await bot.send_message(
+            chat_id=chat_id,
+            text=f"❌ Заявка на вывод для игрока [ID: {player_id}] отклонена администратором.",
+            parse_mode="Markdown"
+        )
+    except Exception:
+        pass
+
+    await callback.answer("Отклонено!")
+
+
+# --- ХЕЛСЧЕК ДЛЯ RENDER ---
 async def handle_ping(request):
     return web.Response(text="Bot is running!")
 
@@ -271,8 +391,8 @@ async def start_web_server():
 
 async def main():
     await start_web_server()
-    print("✅ Бот запущен с недельным топом (Vice Cream + Звезды)")
+    print(f"✅ Бот запущен. Администраторов: {len(ADMIN_IDS)}")
     await dp.start_polling(bot)
 
-if __name__ == "__main__":
+if name == "__main__":
     asyncio.run(main())
