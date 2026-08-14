@@ -11,7 +11,7 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 # Используем токен из .env или тот, что был жестко прописан в твоем коде
 if not BOT_TOKEN:
-    BOT_TOKEN = "8602265987:AAH9SSp5A47r1AaA_WgmzslSttI33o2M0kY"
+
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -89,5 +89,5 @@ async def main():
     print("✅ Bot started")
     await dp.start_polling(bot)
 
-if __name__ == "__main__":
+if name == "__main__":
     asyncio.run(main())
