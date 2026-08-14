@@ -261,45 +261,46 @@ async def handle_dice(message: Message):
 
     user_id = message.from_user.id
     current_time = time.time()
-
-    if current_time - user_cooldowns.get(user_id, 0) < COOLDOWN_SECONDS:
-        return
-    user_cooldowns[user_id] = current_time
-
+    dice_val = message.dice.value
     username = f"@{message.from_user.username}" if message.from_user.username else message.from_user.full_name
 
-    if user_id not in ADMIN_IDS:
-        add_spin(user_id, username)
+    # --- ЕСЛИ ВЫПАЛО НЕ 777 ---
+    if dice_val != 64:
+        # Включаем анти-спам (кулдаун) только для обычных прокрутов
+        if current_time - user_cooldowns.get(user_id, 0) < COOLDOWN_SECONDS:
+            return
+        user_cooldowns[user_id] = current_time
 
-    user_spin_streak[user_id] = user_spin_streak.get(user_id, 0) + 1
-    current_streak = user_spin_streak[user_id]
+        if user_id not in ADMIN_IDS:
+            add_spin(user_id, username)
 
-    dice_val = message.dice.value
+        user_spin_streak[user_id] = user_spin_streak.get(user_id, 0) + 1
+        current_streak = user_spin_streak[user_id]
 
-    # Мотивация: 2 семерки
-    if dice_val in [61, 62, 63]:
-        phrase = random.choice(NEAR_MISS_MOTIVATION)
-        await message.reply(phrase, parse_mode="Markdown")
-        return
+        # Мотивация: 2 семерки
+        if dice_val in [61, 62, 63]:
+            phrase = random.choice(NEAR_MISS_MOTIVATION)
+            await message.reply(phrase, parse_mode="Markdown")
+            return
 
-    # Мотивация: длинный лузстрик (каждые 15 спинов)
-    if current_streak % 15 == 0 and dice_val != 64:
-        template = random.choice(LONG_SPIN_MOTIVATION)
-        text = template.format(username=username, count=current_streak)
-        await message.reply(text, parse_mode="Markdown")
-        return
+        # Мотивация: длинный лузстрик (каждые 15 спинов)
+        if current_streak % 15 == 0:
+            template = random.choice(LONG_SPIN_MOTIVATION)
+            text = template.format(username=username, count=current_streak)
+            await message.reply(text, parse_mode="Markdown")
+            return
 
+        return # Выходим, так как это не 777
 
-
-    # --- ВЫПАДЕНИЕ 777 ---
-        # Если не 777 (значение 64) — выходим
-    if message.dice.value != 64:
-        return
-
-    # Записываем джекпот 777
+    # ==========================================
+    # ЕСЛИ КОД ДОШЕЛ СЮДА — ЭТО 100% ВЫПАЛО 777!
+    # Игнорируем анти-спам, чтобы не пропустить победу!
+    # ==========================================
+    user_cooldowns[user_id] = current_time # Обновляем таймер после победы
+    user_spin_streak[user_id] = 0
+    print(f"🎉 777 выбито игроком {username} (ID: {user_id})!")
     add_win(user_id, username)
 
-    # Получаем подарок
     name, link = get_random_gift("BASE")
 
     keyboard = InlineKeyboardMarkup(
@@ -329,26 +330,29 @@ async def handle_dice(message: Message):
         ]
     )
 
-    win_msg = await message.reply(
-        f"🎁 {username} выбил 777!\n\n"
-        f"Подарок: **{name}**\n"
-        f"🔗 {link}\n\n"
-        f"Выбери действие:\n"
-        f"• Нажми Забрать, чтобы отправить заявку админам на вывод.\n"
-        f"• Нажми Улучшить, чтобы рискнуть улучшить до Snoop Dogg (35% шанс / 65% сгорание).",
-        reply_markup=keyboard,
-        parse_mode="Markdown"
-    )
-
-    # Закрепление победного сообщения
     try:
-        await bot.pin_chat_message(
-            chat_id=message.chat.id,
-            message_id=win_msg.message_id,
-            disable_notification=True
+        win_msg = await message.reply(
+            f"🎁 {username} выбил 777!\n\n"
+            f"Подарок: **{name}**\n"
+            f"🔗 {link}\n\n"
+            f"Выбери действие:\n"
+            f"• Нажми Забрать, чтобы отправить заявку админам на вывод.\n"
+            f"• Нажми Улучшить, чтобы рискнуть улучшить до Snoop Dogg (35% шанс на успех / 65% сгорание).",
+            reply_markup=keyboard,
+            parse_mode="Markdown"
         )
-    except Exception:
-        pass
+
+        try:
+            await bot.pin_chat_message(
+                chat_id=message.chat.id,
+                message_id=win_msg.message_id,
+                disable_notification=True
+            )
+        except Exception:
+            pass
+
+    except Exception as e:
+        print(f"Ошибка отправки сообщения 777: {e}")
 # --- ЗАБРАТЬ ПОДАРОК ---
 @dp.callback_query(F.data.
 startswith("claim:"))
