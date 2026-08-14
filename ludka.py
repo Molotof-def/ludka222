@@ -16,16 +16,18 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN не установлен!")
 
-# Считываем список ID админов через запятую
+# Список ID админов через запятую
 raw_admins = os.getenv("ADMIN_IDS", "12345678,87654321,99999999")
 ADMIN_IDS = [int(admin_id.strip()) for admin_id in raw_admins.split(",") if admin_id.strip().isdigit()]
+
+# Канал для обязательной подписки (юзернейм или ID)
+CHANNEL_ID = os.getenv("CHANNEL_ID", "@your_channel_username")
+CHANNEL_URL = os.getenv("CHANNEL_URL", "https://t.me/your_channel_username")
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 DATA_FILE = "weekly_spins.json"
-
-# Хранилище отправленных сообщений админам для синхронизации
 pending_claims = {}
 
 GIFTS_CONFIG = {
@@ -42,7 +44,7 @@ user_cooldowns = {}
 COOLDOWN_SECONDS = 2
 
 
-# --- РАБОТА С БАЗОЙ ТОПА ---
+# --- РАБОТА С БАЗОЙ ДАННЫХ ---
 def get_current_week_key() -> str:
     year, week, _ = datetime.now(timezone.utc).isocalendar()
     return f"{year}-W{week:02d}"
@@ -69,11 +71,72 @@ def add_spin(user_id: int, name: str):
         
     uid = str(user_id)
     if uid not in data[week_key]:
-        data[week_key][uid] = {"name": name, "spins": 0}
+        data[week_key][uid] = {"name": name, "spins": 0, "wins": 0}
         
     data[week_key][uid]["name"] = name
     data[week_key][uid]["spins"] += 1
     save_data(data)
+
+def add_win(user_id: int):
+    data = load_data()
+    week_key = get_current_week_key()
+    uid = str(user_id)
+    if week_key in data and uid in data[week_key]:
+        data[week_key][uid]["wins"] = data[week_key][uid].get("wins", 0) + 1
+        save_data(data)
+
+def get_user_stats(user_id: int) -> dict:
+    data = load_data()
+    week_key = get_current_week_key()
+    current_week_data = data.get(week_key, {})
+    
+    uid = str(user_id)
+    user_info = current_week_data.get(uid, {"name": "Игрок", "spins": 0, "wins": 0})
+    
+    # Сортируем для вычисления места
+    sorted_players = sorted(current_week_data.items(), key=lambda x: x[1]["spins"], reverse=True)
+    
+    rank = "—"
+    spins_to_top3 = 0
+    
+    for idx, (p_uid, p_data) in enumerate(sorted_players):
+        if p_uid == uid:
+            rank = f"#{idx + 1}"
+            break
+
+    # Считаем, сколько не хватает до топ-3
+    if len(sorted_players) >= 3 and uid in current_week_data:
+        top_3_spins = sorted_players[2][1]["spins"]
+        if user_info["spins"] <= top_3_spins:
+            spins_to_top3 = (top_3_spins - user_info["spins"]) + 1
+
+    return {
+        "name": user_info["name"],
+        "spins": user_info["spins"],
+        "wins": user_info.get("wins", 0),
+        "rank": rank,
+        "spins_to_top3": spins_to_top3
+    }
+
+def generate_profile_text(user_id: int) -> str:
+    stats = get_user_stats(user_id)
+    week_key = get_current_week_key()
+
+    text = "👤 **ЛИЧНЫЙ ПРОФИЛЬ ИГРОКА**\n"
+    text += f"📅 Сезон: `{week_key}`\n"
+    text += "────────────────────\n"
+    text += f"🎮 Никнейм: **{stats['name']}**\n"
+    text += f"🎰 Прокрутов за неделю: **{stats['spins']}**\n"
+    text += f"🔥 Выбито 777: {stats['wins']} раз(а)\n"
+    text += f"🏆 Место в лидерборде: **{stats['rank']}**\n"
+    
+    if stats["spins_to_top3"] > 0:
+        text += f"🎯 До ТОП-3 не хватает: {stats['spins_to_top3']} спинов\n"elif stats["rank"] in ["#1", "#2", "#3"]:
+        text += "👑 **Вы в призовой зоне ТОП-3!**\n"
+        
+    text += "────────────────────\n"
+    text += "🎰 *Крути слот-машину в чате, чтобы подниматься в топе!*"
+    return text
 
 def generate_top_text() -> str:
     data = load_data()
@@ -122,7 +185,17 @@ def get_random_gift(pool_type="BASE"):
     return gift_name, gift_link
 
 
-# --- ПРОВЕРКА НА АДМИНИСТРАТОРА ДЛЯ ТОПА ---
+# --- ПРОВЕРКА ПОДПИСКИ НА КАНАЛ (ОП) ---
+async def check_subscription(user_id: int) -> bool:
+    if user_id in ADMIN_IDS:
+        return True
+    try:
+        member = await bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
+        return member.status in ["member", "administrator", "creator"]
+    except Exception:
+        # Если канал не настроен или бота там нет, не блокируем игру
+        return True
+
 async def is_user_admin(chat_id: int, user_id: int) -> bool:
     if user_id in ADMIN_IDS:
         return True
@@ -132,8 +205,6 @@ async def is_user_admin(chat_id: int, user_id: int) -> bool:
     except Exception:
         return False
 
-
-# --- ОТПРАВКА УВЕДОМЛЕНИЯ ВСЕМ АДМИНАМ ---
 async def notify_all_admins(text: str, reply_markup: InlineKeyboardMarkup, claim_key: str):
     pending_claims[claim_key] = []
     for admin_id in ADMIN_IDS:
@@ -149,10 +220,15 @@ async def notify_all_admins(text: str, reply_markup: InlineKeyboardMarkup, claim
             print(f"Не удалось отправить админу {admin_id}: {e}")
 
 
-# --- КОМАНДЫ И КНОПКИ ТОПА ---
+# --- КОМАНДЫ ТОПА И ПРОФИЛЯ ---
 @dp.message(Command("top"))
 async def cmd_top(message: Message):
     text = generate_top_text()
+    await message.answer(text, parse_mode="Markdown")
+
+@dp.message(Command("profile", "me"))
+async def cmd_profile(message: Message):
+    text = generate_profile_text(message.from_user.id)
     await message.answer(text, parse_mode="Markdown")
 
 @dp.callback_query(F.data == "show_top")
@@ -161,18 +237,23 @@ async def handle_show_top(callback: CallbackQuery):
     await callback.message.answer(text, parse_mode="Markdown")
     await callback.answer()
 
+@dp.callback_query(F.data == "show_profile")
+async def handle_show_profile(callback: CallbackQuery):
+    text = generate_profile_text(callback.from_user.id)
+    await callback.message.answer(text, parse_mode="Markdown")
+    await callback.answer()
+
 
 # --- ХЕНДЛЕР СЛОТ-МАШИНЫ ---
 @dp.message(F.dice)
 async def handle_dice(message: Message):
-    user_id = message.from_user.id
-    current_time = time.time()
+    user_id = message.from_user.idcurrent_time = time.time()
 
     # 1. Защита от пересылок
     if message.forward_origin is not None:
         return
 
-    # 2. Проверка, что отправлена слот-машина 🎰
+    # 2. Проверка, что это слот 🎰
     if message.dice.emoji != "🎰":
         return
 
@@ -181,18 +262,35 @@ async def handle_dice(message: Message):
         return
     user_cooldowns[user_id] = current_time
 
+    # 4. Проверка обязательной подписки на канал
+    is_subscribed = await check_subscription(user_id)
+    if not is_subscribed:
+        sub_kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="📢 Подписаться на канал", url=CHANNEL_URL)]
+            ]
+        )
+        await message.reply(
+            "⚠️ **Для участия в розыгрыше и получения призов необходимо подписаться на наш канал!**",
+            reply_markup=sub_kb,
+            parse_mode="Markdown"
+        )
+        return
+
     username = f"@{message.from_user.username}" if message.from_user.username else message.from_user.full_name
 
-    # В топе участвуют только обычные игроки (админов не записываем)
+    # Засчитываем прокрут обычным игрокам
     is_admin = await is_user_admin(message.chat.id, user_id)
     if not is_admin:
         add_spin(user_id, username)
 
-    # Если не 777 — выходим (но прокрут уже засчитан)
+    # Если не 777 — выходим
     if message.dice.value != 64:
         return
 
-    # 777 падает всем (и админам, и обычным игрокам)
+    # Фиксируем победу в профиль
+    add_win(user_id)
+
     name, link = get_random_gift("BASE")
 
     keyboard = InlineKeyboardMarkup(
@@ -211,6 +309,10 @@ async def handle_dice(message: Message):
             ],
             [
                 InlineKeyboardButton(
+                    text="👤 Мой профиль", 
+                    callback_data="show_profile"
+                ),
+                InlineKeyboardButton(
                     text="🏆 Лидерборд", 
                     callback_data="show_top"
                 )
@@ -218,7 +320,6 @@ async def handle_dice(message: Message):
         ]
     )
 
-    # Отправляем сообщение
     win_msg = await message.reply(
         f"🎁 {username} выбил 777!\n\n"
         f"Подарок: **{name}**\n"
@@ -230,15 +331,15 @@ async def handle_dice(message: Message):
         parse_mode="Markdown"
     )
 
-    # Автоматически закрепляем победное сообщение в чате
+    # Автозакрепление победного сообщения
     try:
         await bot.pin_chat_message(
             chat_id=message.chat.id,
             message_id=win_msg.message_id,
             disable_notification=True
         )
-    except Exception as e:
-        print(f"Не удалось закрепить сообщение (проверьте права бота): {e}")
+    except Exception:
+        pass
 
 
 # --- ЗАБРАТЬ ОБЫЧНЫЙ ПОДАРОК ---
@@ -257,6 +358,7 @@ async def handle_claim(callback: CallbackQuery):
     await callback.message.answer(
         f"⏳ {username} отправил заявку на вывод подарка!\nАдминистрация проверяет отправку."
     )
+
     claim_key = f"{owner_id}_{int(time.time())}"
     admin_kb = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -269,10 +371,7 @@ async def handle_claim(callback: CallbackQuery):
 
     text = f"🔔 **Новая заявка на вывод!**\n\n👤 Игрок: {username} (ID: `{owner_id}`)\n💬 Чат ID: `{chat_id}`"
     await notify_all_admins(text, admin_kb, claim_key)
-    await callback.answer()
-
-
-# --- АПГРЕЙД ДО SNOOP DOGG ---
+    await callback.answer()# --- АПГРЕЙД ДО SNOOP DOGG ---
 @dp.callback_query(F.data.startswith("upg:"))
 async def handle_upgrade(callback: CallbackQuery):
     _, owner_id, chat_id = callback.data.split(":")
@@ -285,7 +384,7 @@ async def handle_upgrade(callback: CallbackQuery):
     await callback.message.edit_reply_markup(reply_markup=None)
     username = f"@{callback.from_user.username}" if callback.from_user.username else callback.from_user.full_name
 
-    # Скрытый реальный шанс: 5%
+    # Реальный скрытый шанс 5%
     is_success = random.randint(1, 100) <= 5
 
     if is_success:
@@ -299,7 +398,6 @@ async def handle_upgrade(callback: CallbackQuery):
             parse_mode="Markdown"
         )
 
-        # Закрепляем супер-выигрыш
         try:
             await bot.pin_chat_message(
                 chat_id=chat_id,
@@ -364,7 +462,8 @@ async def handle_admin_approve(callback: CallbackQuery):
         )
     except Exception:
         pass
-        await callback.answer("Одобрено!")
+
+    await callback.answer("Одобрено!")
 
 
 @dp.callback_query(F.data.startswith("adm_no:"))
@@ -418,8 +517,8 @@ async def start_web_server():
 
 async def main():
     await start_web_server()
-    print(f"✅ Бот запущен. Закрепление сообщений и выигрыши для админов активны.")
+    print("✅ Бот запущен: Обязательная подписка (ОП) и Профили игроков активны!")
     await dp.start_polling(bot)
 
-if __name__ == "__main__":
+if __name__== "__main__":
     asyncio.run(main())
