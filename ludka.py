@@ -495,5 +495,5 @@ async def main():
     print("✅ Бот готов к работе: 80% апгрейд и триггер на 2 семерки включены.")
     await dp.start_polling(bot)
 
-if name == "__main__":
+if __name__ == "__main__":
     asyncio.run(main())
