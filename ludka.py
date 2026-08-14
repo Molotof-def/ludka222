@@ -126,7 +126,7 @@ async def welcome_new_member(message: Message):
         welcome_text = (
             f"👋 Привет, {username}! Добро пожаловать к нам 🎰\n\n"
             f"🎯 **Это приватный чат для игры в слоты и выбивания NFT!**\n"
-            f"Крути кубик 🎰, выбивай 777, соревнуйся в еженедельном топе и забирай крутые призы (Vice Cream, Snoop Dogg и Telegram Stars ⭐).\n\n"
+            f"выбивай 777 🎰, соревнуйся в еженедельном топе и забирай крутые призы (Vice Cream, Snoop Dogg и Telegram Stars ⭐).\n\n"
             f"📌 **Полезные команды:**\n"
             f"🏆 /top — Лидерборд недели\n"
             f"👤 /me — Твой личный профиль и статистика\n\n"
