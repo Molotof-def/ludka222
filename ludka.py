@@ -128,7 +128,8 @@ def generate_top_text() -> str:
     current_week_data = data.get(week_key, {})
 
     text = "🏆 **НЕДЕЛЬНЫЙ ТОП ПО ПРОКРУТАМ**\n"
-    text += f"📅 *Сезон: {week_key}*\n"text += "────────────────────\n"
+    text += f"📅 *Сезон: {week_key}*\n"
+    text += "────────────────────\n"
     text += "🎁 **Призы за топ недели:**\n"
     text += "🥇 1 место — **NFT Vice Cream 🍦**\n"
     text += "🥈 2 место — **50 ⭐ Stars**\n"
