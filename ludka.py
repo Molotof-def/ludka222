@@ -108,7 +108,39 @@ def add_spin(user_id: int, name: str):
     data[week_key][uid]["name"] = name
     data[week_key][uid]["spins"] += 1
     save_data(data)
+# --- ПРИВЕТСТВИЕ НОВЫХ УЧАСТНИКОВ ---
+@dp.message(F.new_chat_members)
+async def welcome_new_member(message: Message):
+    # Проверяем, что это наш разрешенный чат
+    if message.chat.id != ALLOWED_CHAT_ID:
+        return
 
+    for new_member in message.new_chat_members:
+        # Игнорируем добавление самого бота
+        if new_member.id == bot.id:
+            continue
+
+        username = f"@{new_member.username}" if new_member.username else new_member.full_name
+
+        # Текст приветствия (можешь поменять под свой вкус)
+        welcome_text = (
+            f"👋 Привет, {username}! Добро пожаловать к нам 🎰\n\n"
+            f"🎯 **Это приватный чат для игры в слоты и выбивания NFT!**\n"
+            f"Крути кубик 🎰, выбивай 777, соревнуйся в еженедельном топе и забирай крутые призы (Vice Cream, Snoop Dogg и Telegram Stars ⭐).\n\n"
+            f"📌 **Полезные команды:**\n"
+            f"🏆 /top — Лидерборд недели\n"
+            f"👤 /me — Твой личный профиль и статистика\n\n"
+            f"Отправляй 🎰 в чат и пусть тебе повезет! 🔥"
+        )
+
+        # Отправляем приветствие
+        await message.answer(welcome_text, parse_mode="Markdown")
+
+    # Удаляем системное сообщение "Пользователь присоединился к группе", чтобы чат был чистым
+    try:
+        await message.delete()
+    except Exception:
+        pass
 def add_win(user_id: int, name: str):
     data = load_data()
     week_key = get_current_week_key()
