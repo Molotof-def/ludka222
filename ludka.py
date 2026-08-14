@@ -249,7 +249,8 @@ async def handle_claim(callback: CallbackQuery):
         ]
     )
 
-    text = f"🔔 **Новая заявка на вывод!**\n\n👤 Игрок: {username} (ID: `{owner_id}`)\n💬 Чат ID: `{chat_id}`"await notify_all_admins(text, admin_kb, claim_key)
+    text = f"🔔 **Новая заявка на вывод!**\n\n👤 Игрок: {username} (ID: `{owner_id}`)\n💬 Чат ID: `{chat_id}`"
+    await notify_all_admins(text, admin_kb, claim_key)
     await callback.answer()
 
 
