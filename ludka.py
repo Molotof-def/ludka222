@@ -293,11 +293,12 @@ async def handle_dice(message: Message):
         return
 
     # ВЫПАЛО 777
-    user_spin_streak[user_id] = 0
-    print(f"🎉 777 выбито игроком {username} (ID: {user_id})!")
-    add_win(user_id, username)
+    if dice_val == 64:
+        user_spin_streak[user_id] = 0
+        print(f"🎉 777 выбито игроком {username} (ID: {user_id})!")
+        add_win(user_id, username)
 
-    name, link = get_random_gift("BASE")
+        name, link = get_random_gift("BASE")
 
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
