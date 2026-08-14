@@ -21,8 +21,8 @@ raw_admins = os.getenv("ADMIN_IDS", "12345678,87654321,99999999")
 ADMIN_IDS = [int(admin_id.strip()) for admin_id in raw_admins.split(",") if admin_id.strip().isdigit()]
 
 # Канал для обязательной подписки (юзернейм или ID)
-CHANNEL_ID = os.getenv("CHANNEL_ID", "@your_channel_username")
-CHANNEL_URL = os.getenv("CHANNEL_URL", "https://t.me/your_channel_username")
+CHANNEL_ID = os.getenv("CHANNEL_ID", "@ludkanft7771")
+CHANNEL_URL = os.getenv("CHANNEL_URL", "https://t.me/ludkanft7771")
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
