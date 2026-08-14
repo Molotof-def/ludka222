@@ -367,7 +367,8 @@ async def handle_upgrade(callback: CallbackQuery):
     # Реальный шанс: 5%
     is_success = random.randint(1, 100) <= 5
 
-    if is_success:upg_name, upg_link = get_random_gift("UPGRADE")
+    if is_success:
+        upg_name , upg_link = get_random_gift("UPGRADE")
         upg_msg = await callback.message.answer(
             f"🔥 ДЖЕКПОТ! АПГРЕЙД УСПЕШЕН! (Шанс 40% сработал!)\n\n"
             f"👤 Игрок: {username}\n"
