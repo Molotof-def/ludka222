@@ -126,7 +126,7 @@ def generate_profile_text(user_id: int, fallback_name: str) -> str:
 def generate_top_text() -> str:
     data = load_data()
     week_key = get_current_week_key()
-    current_week_data = data.
+    current_week_data = data
     get(week_key, {})
 
     text = "🏆 **НЕДЕЛЬНЫЙ ТОП ПО ПРОКРУТАМ**\n"
