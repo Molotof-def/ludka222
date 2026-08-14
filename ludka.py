@@ -227,8 +227,9 @@ async def cmd_top(message: Message):
 async def cmd_profile(message: Message):
     if not is_allowed_chat(message.chat.id, message.from_user.id):
         return
-    uname = f"@{message.from_user.username}" if message.from_user.
-    username else message.from_user.full_name
+    uname = f"@{message.from_user.username}" 
+    if message.from_user.username 
+    else message.from_user.full_name
     await message.answer(generate_profile_text(message.from_user.id, uname), parse_mode="Markdown")
 
 @dp.callback_query(F.data == "show_top")
