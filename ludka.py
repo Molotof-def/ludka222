@@ -131,7 +131,8 @@ def generate_profile_text(user_id: int) -> str:
     text += f"🏆 Место в лидерборде: **{stats['rank']}**\n"
     
     if stats["spins_to_top3"] > 0:
-        text += f"🎯 До ТОП-3 не хватает: {stats['spins_to_top3']} спинов\n"elif stats["rank"] in ["#1", "#2", "#3"]:
+        text += f"🎯 До ТОП-3 не хватает: {stats['spins_to_top3']} спинов\n"
+        elif stats["rank"] in ["#1", "#2", "#3"]:
         text += "👑 **Вы в призовой зоне ТОП-3!**\n"
         
     text += "────────────────────\n"
