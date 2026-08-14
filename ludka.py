@@ -289,20 +289,24 @@ async def handle_dice(message: Message):
         await message.reply(text, parse_mode="Markdown")
         return
 
-    if dice_val != 64:
-        return
+
 
     # --- ВЫПАДЕНИЕ 777 ---
-    print(f"🎉 777 выбито игроком {username} (ID: {user_id})!")
+        # Если не 777 (значение 64) — выходим
+    if message.dice.value != 64:
+        return
+
+    # Записываем джекпот 777
     add_win(user_id, username)
 
+    # Получаем подарок
     name, link = get_random_gift("BASE")
 
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="⚡️ Улучшить до Snoop Dogg (Шанс 80%)", 
+                    text="⚡️ Улучшить до Snoop Dogg (Шанс 40%)", 
                     callback_data=f"upg:{user_id}:{message.chat.id}"
                 )
             ],
@@ -325,29 +329,26 @@ async def handle_dice(message: Message):
         ]
     )
 
+    win_msg = await message.reply(
+        f"🎁 {username} выбил 777!\n\n"
+        f"Подарок: **{name}**\n"
+        f"🔗 {link}\n\n"
+        f"Выбери действие:\n"
+        f"• Нажми Забрать, чтобы отправить заявку админам на вывод.\n"
+        f"• Нажми Улучшить, чтобы рискнуть улучшить до Snoop Dogg (40% шанс / 60% сгорание).",
+        reply_markup=keyboard,
+        parse_mode="Markdown"
+    )
+
+    # Закрепление победного сообщения
     try:
-        win_msg = await message.reply(
-            f"🎁 {username} выбил 777!\n\n"
-            f"Подарок: **{name}**\n"
-            f"🔗 {link}\n\n"
-            f"Выбери действие:\n"
-            f"• Нажми Забрать, чтобы отправить заявку админам на вывод.\n"
-            f"• Нажми Улучшить, чтобы рискнуть улучшить до Snoop Dogg (🔥 80% шанс на успех / 20% сгорание).",
-            reply_markup=keyboard,
-            parse_mode="Markdown"
+        await bot.pin_chat_message(
+            chat_id=message.chat.id,
+            message_id=win_msg.message_id,
+            disable_notification=True
         )
-
-        try:
-            await bot.pin_chat_message(
-                chat_id=message.chat.id,
-                message_id=win_msg.message_id,
-                disable_notification=True
-            )
-        except Exception:
-            pass
-
-    except Exception as e:
-        print(f"Ошибка отправки сообщения 777: {e}")
+    except Exception:
+        pass
 # --- ЗАБРАТЬ ПОДАРОК ---
 @dp.callback_query(F.data.
 startswith("claim:"))
