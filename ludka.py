@@ -306,7 +306,7 @@ async def handle_dice(message: Message):
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="⚡️ Улучшить до Snoop Dogg (Шанс 40%)", 
+                    text="⚡️ Улучшить до Snoop Dogg (Шанс 35%)", 
                     callback_data=f"upg:{user_id}:{message.chat.id}"
                 )
             ],
