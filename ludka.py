@@ -292,19 +292,17 @@ async def handle_dice(message: Message):
     if dice_val != 64:
         return
 
-    # ВЫПАЛО 777
-    if dice_val == 64:
-        user_spin_streak[user_id] = 0
-        print(f"🎉 777 выбито игроком {username} (ID: {user_id})!")
-        add_win(user_id, username)
+    # --- ВЫПАДЕНИЕ 777 ---
+    print(f"🎉 777 выбито игроком {username} (ID: {user_id})!")
+    add_win(user_id, username)
 
-        name, link = get_random_gift("BASE")
+    name, link = get_random_gift("BASE")
 
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="⚡️ Улучшить до Snoop Dogg (Шанс 35%)", 
+                    text="⚡️ Улучшить до Snoop Dogg (Шанс 80%)", 
                     callback_data=f"upg:{user_id}:{message.chat.id}"
                 )
             ],
@@ -334,7 +332,7 @@ async def handle_dice(message: Message):
             f"🔗 {link}\n\n"
             f"Выбери действие:\n"
             f"• Нажми Забрать, чтобы отправить заявку админам на вывод.\n"
-            f"• Нажми Улучшить, чтобы рискнуть улучшить до Snoop Dogg (35% шанс на успех / 65% сгорание).",
+            f"• Нажми Улучшить, чтобы рискнуть улучшить до Snoop Dogg (🔥 80% шанс на успех / 20% сгорание).",
             reply_markup=keyboard,
             parse_mode="Markdown"
         )
@@ -349,9 +347,7 @@ async def handle_dice(message: Message):
             pass
 
     except Exception as e:
-        print(f"Ошибка отправки 777: {e}")
-
-
+        print(f"Ошибка отправки сообщения 777: {e}")
 # --- ЗАБРАТЬ ПОДАРОК ---
 @dp.callback_query(F.data.
 startswith("claim:"))
