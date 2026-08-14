@@ -16,7 +16,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN не установлен!")
 
-# Считываем список ID админов через запятую (например: "12345678,87654321,99999999")
+# Считываем список ID админов через запятую
 raw_admins = os.getenv("ADMIN_IDS", "12345678,87654321,99999999")
 ADMIN_IDS = [int(admin_id.strip()) for admin_id in raw_admins.split(",") if admin_id.strip().isdigit()]
 
@@ -25,7 +25,7 @@ dp = Dispatcher()
 
 DATA_FILE = "weekly_spins.json"
 
-# Хранилище отправленных сообщений админам для синхронизации кнопок: {claim_key: [(admin_id, message_id)]}
+# Хранилище отправленных сообщений админам для синхронизации
 pending_claims = {}
 
 GIFTS_CONFIG = {
@@ -122,7 +122,7 @@ def get_random_gift(pool_type="BASE"):
     return gift_name, gift_link
 
 
-# --- ПРОВЕРКА НА АДМИНИСТРАТОРА ---
+# --- ПРОВЕРКА НА АДМИНИСТРАТОРА ДЛЯ ТОПА ---
 async def is_user_admin(chat_id: int, user_id: int) -> bool:
     if user_id in ADMIN_IDS:
         return True
@@ -130,7 +130,10 @@ async def is_user_admin(chat_id: int, user_id: int) -> bool:
         member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
         return member.status in ["administrator", "creator"]
     except Exception:
-        return False# --- ОТПРАВКА УВЕДОМЛЕНИЯ ВСЕМ АДМИНАМ ---
+        return False
+
+
+# --- ОТПРАВКА УВЕДОМЛЕНИЯ ВСЕМ АДМИНАМ ---
 async def notify_all_admins(text: str, reply_markup: InlineKeyboardMarkup, claim_key: str):
     pending_claims[claim_key] = []
     for admin_id in ADMIN_IDS:
@@ -165,26 +168,31 @@ async def handle_dice(message: Message):
     user_id = message.from_user.id
     current_time = time.time()
 
-    if message.forward_origin is not None or message.dice.emoji != "🎰":
+    # 1. Защита от пересылок
+    if message.forward_origin is not None:
         return
 
-    if current_time - message.date.timestamp() > 15:
+    # 2. Проверка, что отправлена слот-машина 🎰
+    if message.dice.emoji != "🎰":
         return
 
+    # 3. Кулдаун
     if current_time - user_cooldowns.get(user_id, 0) < COOLDOWN_SECONDS:
         return
     user_cooldowns[user_id] = current_time
 
     username = f"@{message.from_user.username}" if message.from_user.username else message.from_user.full_name
 
-    # Все 3 админа и админы чата исключены из топа
+    # В топе участвуют только обычные игроки (админов не записываем)
     is_admin = await is_user_admin(message.chat.id, user_id)
     if not is_admin:
         add_spin(user_id, username)
 
+    # Если не 777 — выходим (но прокрут уже засчитан)
     if message.dice.value != 64:
         return
 
+    # 777 падает всем (и админам, и обычным игрокам)
     name, link = get_random_gift("BASE")
 
     keyboard = InlineKeyboardMarkup(
@@ -210,16 +218,27 @@ async def handle_dice(message: Message):
         ]
     )
 
-    await message.answer(
+    # Отправляем сообщение
+    win_msg = await message.reply(
         f"🎁 {username} выбил 777!\n\n"
         f"Подарок: **{name}**\n"
         f"🔗 {link}\n\n"
         f"Выбери действие:\n"
         f"• Нажми Забрать, чтобы отправить заявку админам на вывод.\n"
-        f"• Нажми Улучшить, чтобы рискнуть получить Snoop Dogg (40% шанс / 60% сгорание).",
+        f"• Нажми Улучшить, чтобы рискнуть улучшить до Snoop Dogg (40% шанс / 60% сгорание).",
         reply_markup=keyboard,
         parse_mode="Markdown"
     )
+
+    # Автоматически закрепляем победное сообщение в чате
+    try:
+        await bot.pin_chat_message(
+            chat_id=message.chat.id,
+            message_id=win_msg.message_id,
+            disable_notification=True
+        )
+    except Exception as e:
+        print(f"Не удалось закрепить сообщение (проверьте права бота): {e}")
 
 
 # --- ЗАБРАТЬ ОБЫЧНЫЙ ПОДАРОК ---
@@ -238,7 +257,6 @@ async def handle_claim(callback: CallbackQuery):
     await callback.message.answer(
         f"⏳ {username} отправил заявку на вывод подарка!\nАдминистрация проверяет отправку."
     )
-
     claim_key = f"{owner_id}_{int(time.time())}"
     admin_kb = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -267,12 +285,12 @@ async def handle_upgrade(callback: CallbackQuery):
     await callback.message.edit_reply_markup(reply_markup=None)
     username = f"@{callback.from_user.username}" if callback.from_user.username else callback.from_user.full_name
 
-    # Реальный шанс: 5%
+    # Скрытый реальный шанс: 5%
     is_success = random.randint(1, 100) <= 5
 
     if is_success:
         upg_name, upg_link = get_random_gift("UPGRADE")
-        await callback.message.answer(
+        upg_msg = await callback.message.answer(
             f"🔥 ДЖЕКПОТ! АПГРЕЙД УСПЕШЕН! (Шанс 40% сработал!)\n\n"
             f"👤 Игрок: {username}\n"
             f"✨ Эксклюзивный Подарок: **{upg_name}**\n"
@@ -280,6 +298,16 @@ async def handle_upgrade(callback: CallbackQuery):
             f"⏳ Заявка передана администрации на подтверждение!",
             parse_mode="Markdown"
         )
+
+        # Закрепляем супер-выигрыш
+        try:
+            await bot.pin_chat_message(
+                chat_id=chat_id,
+                message_id=upg_msg.message_id,
+                disable_notification=False
+            )
+        except Exception:
+            pass
 
         claim_key = f"{owner_id}_{int(time.time())}"
         admin_kb = InlineKeyboardMarkup(
@@ -316,7 +344,6 @@ async def handle_admin_approve(callback: CallbackQuery):
     player_id, chat_id = int(player_id), int(chat_id)
     admin_name = f"@{callback.from_user.username}" if callback.from_user.username else callback.from_user.full_name
 
-    # Обновляем сообщения у всех 3 админов
     if claim_key in pending_claims:
         for adm_id, msg_id in pending_claims[claim_key]:
             try:
@@ -337,8 +364,7 @@ async def handle_admin_approve(callback: CallbackQuery):
         )
     except Exception:
         pass
-
-    await callback.answer("Одобрено!")
+        await callback.answer("Одобрено!")
 
 
 @dp.callback_query(F.data.startswith("adm_no:"))
@@ -351,11 +377,11 @@ async def handle_admin_reject(callback: CallbackQuery):
     player_id, chat_id = int(player_id), int(chat_id)
     admin_name = f"@{callback.from_user.username}" if callback.from_user.username else callback.from_user.full_name
 
-    # Обновляем сообщения у всех 3 админов
     if claim_key in pending_claims:
         for adm_id, msg_id in pending_claims[claim_key]:
             try:
-                await bot.edit_message_text(chat_id=adm_id,
+                await bot.edit_message_text(
+                    chat_id=adm_id,
                     message_id=msg_id,
                     text=f"{callback.message.text}\n\n❌ **ОТКЛОНЕНО администратором {admin_name}**"
                 )
@@ -392,7 +418,7 @@ async def start_web_server():
 
 async def main():
     await start_web_server()
-    print(f"✅ Бот запущен. Администраторов: {len(ADMIN_IDS)}")
+    print(f"✅ Бот запущен. Закрепление сообщений и выигрыши для админов активны.")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
